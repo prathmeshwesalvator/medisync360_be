@@ -219,3 +219,26 @@ class AdminVerifyHospitalView(APIView):
         hospital.save(update_fields=['is_verified'])
         label = 'verified' if hospital.is_verified else 'unverified'
         return success_response(message=f'Hospital {label} successfully.')
+    
+
+
+
+
+class HospitalMapView(APIView):
+    """
+    GET /api/hospitals/map/
+    Returns ALL active hospitals that have coordinates.
+    Used by the Flutter map screen on initial load — no distance filtering.
+    No auth required.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        qs = Hospital.objects.filter(
+            status=Hospital.Status.ACTIVE,
+            latitude__isnull=False,
+            longitude__isnull=False,
+        ).order_by('name')
+
+        data = HospitalListSerializer(qs, many=True).data
+        return success_response(data={'count': qs.count(), 'results': data})

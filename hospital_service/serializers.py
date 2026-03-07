@@ -14,25 +14,25 @@ class AmenitySerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'is_available']
 
 
+
 class HospitalListSerializer(serializers.ModelSerializer):
     bed_occupancy_percent = serializers.ReadOnlyField()
     icu_occupancy_percent = serializers.ReadOnlyField()
-    distance_km           = serializers.SerializerMethodField()
 
     class Meta:
         model  = Hospital
         fields = [
-            'id', 'name', 'city', 'state', 'pincode', 'address',
-            'phone', 'logo_url', 'image_url',
+            'id', 'name', 'address', 'city', 'state', 'pincode',
+            'phone', 'email', 'website',
+            'logo_url', 'image_url', 'description', 'status',
             'total_beds', 'available_beds',
             'icu_total', 'icu_available',
             'emergency_beds', 'emergency_available',
             'bed_occupancy_percent', 'icu_occupancy_percent',
-            'status', 'is_verified', 'latitude', 'longitude', 'distance_km',
+            'latitude', 'longitude',   # ← MAKE SURE THESE ARE HERE
+            'is_verified', 'established_year',
         ]
 
-    def get_distance_km(self, obj):
-        return getattr(obj, 'distance_km', None)
 
 
 class HospitalDetailSerializer(serializers.ModelSerializer):
@@ -95,3 +95,7 @@ class CapacityLogSerializer(serializers.ModelSerializer):
     class Meta:
         model  = CapacityLog
         fields = '__all__'
+
+
+
+
