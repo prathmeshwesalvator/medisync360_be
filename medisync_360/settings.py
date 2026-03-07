@@ -149,6 +149,13 @@ SIMPLE_JWT = {
 # CORS — allow Flutter dev
 CORS_ALLOW_ALL_ORIGINS = True
 
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://*.onrender.com",
+    "http://localhost:3000",
+    "http://127.0.0.1:8000",
+]
+
 STATIC_URL = '/static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
