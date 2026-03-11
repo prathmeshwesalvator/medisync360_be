@@ -89,7 +89,7 @@ class UserRegisterSerializer(serializers.ModelSerializer):
 class DoctorRegisterSerializer(serializers.ModelSerializer):
     password         = serializers.CharField(write_only=True, min_length=8)
     confirm_password = serializers.CharField(write_only=True)
-    doctor_profile   = DoctorProfileSerializer()
+    doctor_profile = serializers.DictField(write_only=True)
 
     class Meta:
         model  = User
