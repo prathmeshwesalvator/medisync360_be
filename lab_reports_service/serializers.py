@@ -1,29 +1,42 @@
 from rest_framework import serializers
-from .models import LabReport, LabTestResult
+from .models import LabReport, ReportQuestion
 
-class LabTestResultSerializer(serializers.ModelSerializer):
-    class Meta:
-        model  = LabTestResult
-        exclude = ['report']
 
 class LabReportSerializer(serializers.ModelSerializer):
-    results         = LabTestResultSerializer(many=True, read_only=True)
-    uploaded_by_name= serializers.CharField(source='uploaded_by.full_name', read_only=True)
-    patient_name    = serializers.CharField(source='patient.full_name', read_only=True)
     class Meta:
-        model  = LabReport
-        fields = ['id','patient_name','uploaded_by_name','title','report_type',
-                  'file_url','test_date','status','notes','results','created_at']
+        model = LabReport
+        fields = [
+            'id', 'title', 'report_type', 'image', 'uploaded_at',
+            'status', 'ocr_raw_text', 'extracted_data',
+            'ai_analysis', 'ai_structured_result', 'notes'
+        ]
+        read_only_fields = [
+            'uploaded_at', 'status', 'ocr_raw_text',
+            'extracted_data', 'ai_analysis', 'ai_structured_result'
+        ]
 
-class LabReportCreateSerializer(serializers.ModelSerializer):
-    results = LabTestResultSerializer(many=True, required=False)
+
+class LabReportUploadSerializer(serializers.ModelSerializer):
     class Meta:
-        model   = LabReport
-        exclude = ['patient','uploaded_by','doctor','hospital','created_at','updated_at']
+        model = LabReport
+        fields = ['id', 'title', 'report_type', 'image', 'notes']
 
-    def create(self, validated_data):
-        results_data = validated_data.pop('results', [])
-        report = LabReport.objects.create(**validated_data)
-        for r in results_data:
-            LabTestResult.objects.create(report=report, **r)
-        return report
+
+class LabReportListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LabReport
+        fields = [
+            'id', 'title', 'report_type', 'uploaded_at',
+            'status', 'ai_structured_result'
+        ]
+
+
+class ReportQuestionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReportQuestion
+        fields = ['id', 'question', 'answer', 'asked_at']
+        read_only_fields = ['answer', 'asked_at']
+
+
+class AskQuestionSerializer(serializers.Serializer):
+    question = serializers.CharField(max_length=1000)

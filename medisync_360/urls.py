@@ -16,4 +16,5 @@ urlpatterns = [
     path('api/ehr/',           include('ehr_service.urls')),
     path('api/notifications/', include('notifications_service.urls')),
     path('api/lab-reports/',   include('lab_reports_service.urls')),
+    path('api/sos/', include('sos_service.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

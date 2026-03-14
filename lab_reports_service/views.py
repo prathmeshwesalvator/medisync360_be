@@ -1,71 +1,196 @@
+import threading
+from rest_framework import generics, permissions, status
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
-from .models import LabReport
-from .serializers import LabReportSerializer, LabReportCreateSerializer
-from .lab_service import can_access_report
-from utils.response import success_response, error_response
+from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser
+
+from .models import LabReport, ReportQuestion
+from .serializers import (
+    LabReportSerializer,
+    LabReportUploadSerializer,
+    LabReportListSerializer,
+    ReportQuestionSerializer,
+    AskQuestionSerializer,
+)
+from .lab_service import process_lab_report, ask_followup_question
 
 
-class LabReportListView(APIView):
-    permission_classes = [IsAuthenticated]
-    def get(self, request):
-        qs = LabReport.objects.filter(patient=request.user)
-        return success_response(data=LabReportSerializer(qs, many=True).data)
+def _run_analysis(report: LabReport):
+    """Background thread: run OCR + GPT and save results."""
+    report.status = 'processing'
+    report.save(update_fields=['status'])
+
+    result = process_lab_report(
+        image_path=report.image.path,
+        report_type=report.report_type,
+    )
+
+    if 'error' in result and not result.get('ai_result'):
+        report.status = 'failed'
+        report.ocr_raw_text = result.get('error', '')
+    else:
+        report.status = 'completed'
+        report.ocr_raw_text = result.get('ocr_text', '')
+        report.extracted_data = result.get('extracted_params', {})
+        report.ai_structured_result = result.get('ai_result', {})
+        report.ai_analysis = result.get('ai_result', {}).get('summary', '')
+
+    report.save()
+
+
+class LabReportUploadView(APIView):
+    """
+    POST /lab-reports/upload/
+    Upload a lab report image. Analysis runs async in background.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
-        # Patient uploading their own report
-        s = LabReportCreateSerializer(data=request.data)
-        if not s.is_valid(): return error_response('Validation failed.', s.errors)
-        report = s.save(patient=request.user, uploaded_by=request.user)
-        return success_response(data=LabReportSerializer(report).data, status_code=201)
-
-
-class LabReportDetailView(APIView):
-    permission_classes = [IsAuthenticated]
-    def get(self, request, pk):
-        try: report = LabReport.objects.get(pk=pk)
-        except LabReport.DoesNotExist: return error_response('Not found.', status_code=404)
-        if not can_access_report(request.user, report):
-            return error_response('Access denied.', status_code=403)
-        return success_response(data=LabReportSerializer(report).data)
-
-
-class PatientLabReportView(APIView):
-    """Doctor or hospital uploads report on behalf of patient."""
-    permission_classes = [IsAuthenticated]
-    def post(self, request, patient_id):
-        from django.contrib.auth import get_user_model
-        U = get_user_model()
-        try: patient = U.objects.get(pk=patient_id, role='user')
-        except: return error_response('Patient not found.', status_code=404)
-        s = LabReportCreateSerializer(data=request.data)
-        if not s.is_valid(): return error_response('Validation failed.', s.errors)
-        report = s.save(
-            patient=patient,
-            uploaded_by=request.user,
-            doctor=getattr(request.user, 'doctor_profile', None),
-            hospital=getattr(getattr(request.user, 'hospital', None), None, None),
-        )
-        try:
-            from notifications_service.notification_service import create_notification
-            from notifications_service.models import Notification
-            create_notification(
-                recipient=patient,
-                title='Lab Report Uploaded',
-                body=f'A new lab report ({report.title}) has been uploaded for you.',
-                notif_type=Notification.Type.LAB_REPORT_UPLOADED,
-                data={'report_id': report.id},
+        serializer = LabReportUploadSerializer(data=request.data)
+        if serializer.is_valid():
+            report = serializer.save(user=request.user, status='pending')
+            # Fire-and-forget analysis
+            thread = threading.Thread(target=_run_analysis, args=(report,), daemon=True)
+            thread.start()
+            return Response(
+                {
+                    "message": "Report uploaded. Analysis is in progress.",
+                    "report_id": report.id,
+                    "status": report.status,
+                },
+                status=status.HTTP_201_CREATED
             )
-        except Exception:
-            pass
-        return success_response(data=LabReportSerializer(report).data, status_code=201)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    def get(self, request, patient_id):
-        from django.contrib.auth import get_user_model
-        U = get_user_model()
-        try: patient = U.objects.get(pk=patient_id, role='user')
-        except: return error_response('Patient not found.', status_code=404)
-        if request.user.role not in ['doctor','hospital','admin']:
-            return error_response('Access denied.', status_code=403)
-        qs = LabReport.objects.filter(patient=patient)
-        return success_response(data=LabReportSerializer(qs, many=True).data)
+
+class LabReportListView(generics.ListAPIView):
+    """
+    GET /lab-reports/
+    List all reports for authenticated user.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LabReportListSerializer
+
+    def get_queryset(self):
+        return LabReport.objects.filter(user=self.request.user)
+
+
+class LabReportDetailView(generics.RetrieveAPIView):
+    """
+    GET /lab-reports/<id>/
+    Full detail of a single report including AI analysis.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LabReportSerializer
+
+    def get_queryset(self):
+        return LabReport.objects.filter(user=self.request.user)
+
+
+class LabReportDeleteView(generics.DestroyAPIView):
+    """
+    DELETE /lab-reports/<id>/delete/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return LabReport.objects.filter(user=self.request.user)
+
+
+class LabReportStatusView(APIView):
+    """
+    GET /lab-reports/<id>/status/
+    Poll processing status.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            report = LabReport.objects.get(pk=pk, user=request.user)
+            return Response({"id": report.id, "status": report.status})
+        except LabReport.DoesNotExist:
+            return Response({"error": "Not found"}, status=404)
+
+
+class AskQuestionView(APIView):
+    """
+    POST /lab-reports/<id>/ask/
+    Ask a follow-up question about a specific report.
+    Body: { "question": "..." }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            report = LabReport.objects.get(pk=pk, user=request.user)
+        except LabReport.DoesNotExist:
+            return Response({"error": "Report not found"}, status=404)
+
+        if report.status != 'completed':
+            return Response(
+                {"error": "Report analysis is not complete yet."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        serializer = AskQuestionSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+
+        question_text = serializer.validated_data['question']
+        answer = ask_followup_question(
+            report_context=report.ai_structured_result or {},
+            question=question_text,
+        )
+
+        qa = ReportQuestion.objects.create(
+            report=report,
+            user=request.user,
+            question=question_text,
+            answer=answer,
+        )
+        return Response(ReportQuestionSerializer(qa).data)
+
+
+class ReportQuestionsListView(generics.ListAPIView):
+    """
+    GET /lab-reports/<pk>/questions/
+    Retrieve all Q&A for a report.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ReportQuestionSerializer
+
+    def get_queryset(self):
+        return ReportQuestion.objects.filter(
+            report_id=self.kwargs['pk'],
+            user=self.request.user
+        )
+
+
+class ReportSummaryView(APIView):
+    """
+    GET /lab-reports/<id>/summary/
+    Returns a lightweight health summary card for the mobile dashboard.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            report = LabReport.objects.get(pk=pk, user=request.user)
+        except LabReport.DoesNotExist:
+            return Response({"error": "Not found"}, status=404)
+
+        if report.status != 'completed' or not report.ai_structured_result:
+            return Response({"status": report.status, "message": "Analysis pending"})
+
+        result = report.ai_structured_result
+        return Response({
+            "id": report.id,
+            "report_type": result.get("report_type", report.report_type),
+            "uploaded_at": report.uploaded_at,
+            "summary": result.get("summary", ""),
+            "abnormal_flags": result.get("abnormal_flags", []),
+            "critical_alerts": result.get("critical_alerts", []),
+            "doctor_consult_urgency": result.get("doctor_consult_urgency", "routine"),
+            "doctor_consult_reason": result.get("doctor_consult_reason", ""),
+        })

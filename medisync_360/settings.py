@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
 from datetime import timedelta
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -53,6 +54,7 @@ INSTALLED_APPS = [
     'ehr_service',
     'notifications_service',
     'lab_reports_service',
+    'sos_service',
 ]
 
 MIDDLEWARE = [
@@ -169,3 +171,13 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+
+# OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
+
+OPENAI_API_KEY='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'
+ 
+# Media files (for uploaded lab report images)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'

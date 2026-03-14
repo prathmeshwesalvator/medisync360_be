@@ -29,7 +29,7 @@ def generate_slots_for_date(doctor: DoctorProfile, date: datetime.date) -> list:
             doctor=doctor,
             date=date,
             start_time=current.time(),
-            defaults={'end_time': slot_end.time(), 'status': TimeSlot.AVAILABLE},
+            defaults={'end_time': slot_end.time(), 'status': 'available'},
         )
         if created:
             slots.append(obj)
@@ -39,7 +39,7 @@ def generate_slots_for_date(doctor: DoctorProfile, date: datetime.date) -> list:
 
 def get_available_slots(doctor: DoctorProfile, date: datetime.date) -> list:
     generate_slots_for_date(doctor, date)
-    return list(TimeSlot.objects.filter(doctor=doctor, date=date, status=TimeSlot.AVAILABLE))
+    return list(TimeSlot.objects.filter(doctor=doctor, date=date, status='available'))
 
 
 def search_doctors(query='', specialization='', city='', available_only=False):

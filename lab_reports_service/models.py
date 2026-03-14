@@ -3,38 +3,75 @@ from django.conf import settings
 
 
 class LabReport(models.Model):
-    class Status(models.TextChoices):
-        PENDING   = 'pending',   'Pending'
-        PROCESSED = 'processed', 'Processed'
-        VERIFIED  = 'verified',  'Verified'
+    REPORT_TYPE_CHOICES = [
+        ('blood_test', 'Blood Test'),
+        ('urine_test', 'Urine Test'),
+        ('lipid_panel', 'Lipid Panel'),
+        ('liver_function', 'Liver Function Test'),
+        ('kidney_function', 'Kidney Function Test'),
+        ('thyroid', 'Thyroid Panel'),
+        ('cbc', 'Complete Blood Count'),
+        ('diabetes', 'Diabetes Panel'),
+        ('other', 'Other'),
+    ]
 
-    patient     = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='lab_reports')
-    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='uploaded_reports')
-    doctor      = models.ForeignKey('doctors_service.DoctorProfile', on_delete=models.SET_NULL, null=True, blank=True, related_name='lab_reports')
-    hospital    = models.ForeignKey('hospital_service.Hospital', on_delete=models.SET_NULL, null=True, blank=True, related_name='lab_reports')
-    appointment = models.ForeignKey('appointments_service.Appointment', on_delete=models.SET_NULL, null=True, blank=True, related_name='lab_reports')
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('processing', 'Processing'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+    ]
 
-    title           = models.CharField(max_length=200)
-    report_type     = models.CharField(max_length=100)     # e.g. "CBC", "LFT", "Blood Sugar"
-    file_url        = models.URLField()
-    test_date       = models.DateField()
-    status          = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
-    notes           = models.TextField(blank=True)
-    created_at      = models.DateTimeField(auto_now_add=True)
-    updated_at      = models.DateTimeField(auto_now=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='lab_reports'
+    )
+    title = models.CharField(max_length=255, blank=True)
+    report_type = models.CharField(
+        max_length=50, choices=REPORT_TYPE_CHOICES, default='other'
+    )
+    image = models.ImageField(upload_to="lab_reports/", null=True, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+
+    # OCR extracted raw text
+    ocr_raw_text = models.TextField(blank=True, null=True)
+
+    # Structured data extracted from OCR
+    extracted_data = models.JSONField(blank=True, null=True)
+
+    # GPT analysis result
+    ai_analysis = models.TextField(blank=True, null=True)
+
+    # Structured GPT output stored as JSON
+    ai_structured_result = models.JSONField(blank=True, null=True)
+
+    # Patient notes
+    notes = models.TextField(blank=True, null=True)
 
     class Meta:
-        db_table = 'lab_reports'
-        ordering = ['-test_date','-created_at']
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        return f"{self.user} - {self.report_type} - {self.uploaded_at.date()}"
 
 
-class LabTestResult(models.Model):
-    report      = models.ForeignKey(LabReport, on_delete=models.CASCADE, related_name='results')
-    test_name   = models.CharField(max_length=200)
-    value       = models.CharField(max_length=100)
-    unit        = models.CharField(max_length=50, blank=True)
-    normal_range= models.CharField(max_length=100, blank=True)
-    is_abnormal = models.BooleanField(default=False)
+class ReportQuestion(models.Model):
+    """Stores follow-up questions asked by user about a specific report."""
+    report = models.ForeignKey(
+        LabReport, on_delete=models.CASCADE, related_name='questions'
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE
+    )
+    question = models.TextField()
+    answer = models.TextField(blank=True, null=True)
+    asked_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'lab_test_results'
+        ordering = ['asked_at']
+
+    def __str__(self):
+        return f"Q: {self.question[:60]}..."
