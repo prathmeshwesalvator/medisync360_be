@@ -11,7 +11,6 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
 from datetime import timedelta
-import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -177,7 +176,12 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
 
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
  
 # Media files (for uploaded lab report images)
