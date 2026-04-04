@@ -64,7 +64,7 @@ def parse_lab_values(ocr_text: str) -> dict:
         'Calcium':        r'(?:Calcium|Ca)\s*[:\-]?\s*([\d.]+)\s*(mg/dL)?',
         'Vitamin_D':      r'(?:Vitamin D|25-OH|25-Hydroxy)\s*[:\-]?\s*([\d.]+)\s*(ng/mL|nmol/L)?',
         'Vitamin_B12':    r'(?:Vitamin B12|Cobalamin|B12)\s*[:\-]?\s*([\d.]+)\s*(pg/mL|pmol/L)?',
-        'Iron':           r'(?:Serum Iron|Iron)\s*[:\-]?\s*([\d.]+)\s*(µg/dL|µmol/L)?',
+        'Iron':           r'(?:Serum Iron|Iron)\s*[:\-]?\s*([\d.]+)\s*(µg/dL|µmol/L)?' ,
         'Ferritin':       r'(?:Ferritin)\s*[:\-]?\s*([\d.]+)\s*(ng/mL|µg/L)?',
     }
 

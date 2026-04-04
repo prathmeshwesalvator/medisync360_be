@@ -1,17 +1,34 @@
 from rest_framework import serializers
-from .models import Appointment, AppointmentReminder
+from .models import Appointment, AppointmentStatusLog, AppointmentReminder
 import datetime
 
 
+# ── Status log ────────────────────────────────────────────────────────────────
+
+class AppointmentStatusLogSerializer(serializers.ModelSerializer):
+    changed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = AppointmentStatusLog
+        fields = ['id', 'from_status', 'to_status', 'changed_by_name', 'reason', 'changed_at']
+
+    def get_changed_by_name(self, obj):
+        return obj.changed_by.full_name if obj.changed_by else None
+
+
+# ── Create ────────────────────────────────────────────────────────────────────
+
 class AppointmentCreateSerializer(serializers.Serializer):
-    # FIX: Flutter sends 'doctor' (int) and 'slot_id' (int)
-    doctor  = serializers.IntegerField()
-    slot_id = serializers.IntegerField()
-    reason  = serializers.CharField(required=False, allow_blank=True, default='')
+    doctor           = serializers.IntegerField()
+    slot_id          = serializers.IntegerField()
+    reason           = serializers.CharField(required=False, allow_blank=True, default='')
+    symptoms         = serializers.CharField(required=False, allow_blank=True, default='')
+    appointment_type = serializers.ChoiceField(
+        choices=Appointment.AppointmentType.choices,
+        default=Appointment.AppointmentType.IN_PERSON,
+    )
 
     def validate(self, attrs):
-        # FIX: correct import — was 'from medisync_360.doctors_service.models'
-        # which resolves to package-level, causing ImportError at runtime
         from doctors_service.models import DoctorProfile, TimeSlot
         try:
             attrs['doctor_obj'] = DoctorProfile.objects.get(pk=attrs['doctor'])
@@ -21,7 +38,6 @@ class AppointmentCreateSerializer(serializers.Serializer):
             slot = TimeSlot.objects.get(pk=attrs['slot_id'], doctor=attrs['doctor_obj'])
         except TimeSlot.DoesNotExist:
             raise serializers.ValidationError({'slot_id': 'Slot not found.'})
-        # FIX: use string literal — TimeSlot has no class-level AVAILABLE constant
         if slot.status != 'available':
             raise serializers.ValidationError({'slot_id': 'Slot is not available.'})
         if slot.date < datetime.date.today():
@@ -30,62 +46,77 @@ class AppointmentCreateSerializer(serializers.Serializer):
         return attrs
 
 
+# ── List & Detail ─────────────────────────────────────────────────────────────
+
 class AppointmentListSerializer(serializers.ModelSerializer):
-    patient_name    = serializers.CharField(source='patient.full_name', read_only=True)
-    patient_email   = serializers.CharField(source='patient.email', read_only=True)
-    patient_phone   = serializers.CharField(source='patient.phone', read_only=True)
-    doctor_name     = serializers.CharField(source='doctor.user.full_name', read_only=True)
-    # FIX: Flutter reads 'doctor_specialty' — was serialized as 'specialization'
+    patient_name     = serializers.CharField(source='patient.full_name', read_only=True)
+    patient_email    = serializers.CharField(source='patient.email', read_only=True)
+    patient_phone    = serializers.CharField(source='patient.phone', read_only=True)
+    doctor_name      = serializers.CharField(source='doctor.user.full_name', read_only=True)
     doctor_specialty = serializers.CharField(source='doctor.specialization', read_only=True)
-    hospital_name   = serializers.SerializerMethodField()
-    # FIX: Flutter reads 'appointment_date' — model field is 'date'
+    hospital_name    = serializers.SerializerMethodField()
     appointment_date = serializers.DateField(source='date', read_only=True)
-    # FIX: Flutter reads 'slot_time' — model field is 'start_time'
-    slot_time       = serializers.TimeField(source='start_time', read_only=True)
-    # FIX: Flutter reads 'appointment_type' — not in model, derive from notes or default
-    appointment_type = serializers.SerializerMethodField()
+    slot_time        = serializers.TimeField(source='start_time', read_only=True)
+    status_logs      = AppointmentStatusLogSerializer(many=True, read_only=True)
 
     class Meta:
         model  = Appointment
         fields = [
-            'id', 'patient_name', 'patient_email', 'patient_phone',
+            'id',
+            'patient_name', 'patient_email', 'patient_phone',
             'doctor_name', 'doctor_specialty', 'hospital_name',
             'appointment_date', 'slot_time', 'appointment_type',
             'status', 'consultation_fee', 'payment_status',
-            'reason', 'notes', 'cancel_reason', 'reschedule_count',
+            'reason', 'symptoms', 'notes', 'diagnosis', 'prescription',
+            'cancel_reason', 'reschedule_count',
+            'confirmed_at', 'completed_at', 'meeting_link',
+            'payment_marked_at',
             'created_at', 'updated_at',
+            'status_logs',
         ]
 
     def get_hospital_name(self, obj):
         return obj.hospital.name if obj.hospital else None
 
-    def get_appointment_type(self, obj):
-        # appointment_type is stored in notes prefix or defaults to in_person
-        # If you add an appointment_type field to the model later, update here
-        return getattr(obj, 'appointment_type', 'in_person')
-
 
 class AppointmentDetailSerializer(AppointmentListSerializer):
-    """Same as list — all fields already included above."""
+    """Identical to list — all fields already present."""
     pass
 
+
+# ── Doctor actions ────────────────────────────────────────────────────────────
+
+class ConfirmAppointmentSerializer(serializers.Serializer):
+    meeting_link = serializers.URLField(required=False, allow_blank=True, default='')
+
+
+class CompleteAppointmentSerializer(serializers.Serializer):
+    notes        = serializers.CharField(required=False, allow_blank=True, default='')
+    diagnosis    = serializers.CharField(required=False, allow_blank=True, default='')
+    prescription = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class UpdateNotesSerializer(serializers.Serializer):
+    notes        = serializers.CharField(required=False, allow_blank=True, default='')
+    diagnosis    = serializers.CharField(required=False, allow_blank=True, default='')
+    prescription = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+# ── Patient actions ───────────────────────────────────────────────────────────
 
 class RescheduleSerializer(serializers.Serializer):
     slot_id = serializers.IntegerField()
 
     def validate_slot_id(self, value):
-        # FIX: was 'from models import TimeSlot' — missing package path, crashes at runtime
         from doctors_service.models import TimeSlot
         try:
             slot = TimeSlot.objects.get(pk=value)
         except TimeSlot.DoesNotExist:
             raise serializers.ValidationError('Slot not found.')
-        # FIX: use string literal
         if slot.status != 'available':
             raise serializers.ValidationError('Slot is not available.')
         if slot.date < datetime.date.today():
             raise serializers.ValidationError('Cannot reschedule to a past slot.')
-        # Return the slot object so views.py can pass it directly to reschedule_appointment()
         return slot
 
 

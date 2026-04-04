@@ -19,7 +19,7 @@ class MedicalHistory(models.Model):
 
 
 class Prescription(models.Model):
-    appointment = models.OneToOneField('appointments_service.Appointment', on_delete=models.CASCADE, related_name='prescription', null=True, blank=True)
+    appointment = models.OneToOneField('appointments_service.Appointment', on_delete=models.CASCADE, related_name='ehr_prescription', null=True, blank=True)
     patient     = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='prescriptions')
     doctor      = models.ForeignKey('doctors_service.DoctorProfile', on_delete=models.CASCADE, related_name='prescriptions')
     diagnosis   = models.TextField()
